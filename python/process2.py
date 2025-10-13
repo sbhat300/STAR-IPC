@@ -55,6 +55,6 @@ try:
             pass
 finally:
     print('PYTHON: closing fifos')
-    # close py_fifo
+    os.close(py_fifo)
     os.close(c_fifo)
     
