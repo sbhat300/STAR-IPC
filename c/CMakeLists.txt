@@ -9,4 +9,4 @@ target_include_directories(${PROJECT_NAME} PUBLIC ${PROJECT_SOURCE_DIR}/include)
 target_link_libraries(${PROJECT_NAME} ${PROJECT_SOURCE_DIR}/lib/libspicenet.a)
 
 target_compile_options(${PROJECT_NAME} PRIVATE ${COMPILER_FLAGS})
-target_link_options(${PROJECT_NAME} PRIVATE ${COMPILER_FLAGS})
+target_link_options(${PROJECT_NAME} PRIVATE ${COMPILER_FLAGS}) 
