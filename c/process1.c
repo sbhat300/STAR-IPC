@@ -1,8 +1,5 @@
 #include <stdio.h>
 
-#include <spicenet/config.h>
-#include <spicenet/snp.h>
-
 #include "IPCHelper.h"
 
 void doSomething(int len, const char* msg)
