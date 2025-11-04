@@ -1,7 +1,6 @@
 
 import os
 import select
-import atexit
 import struct
 from typing import Callable
 
@@ -34,7 +33,6 @@ def setup():
     c_fifo = os.open(C_FIFO_LOCATION, os.O_RDONLY | os.O_NONBLOCK)
     print('OPENING PY FIFO')
     py_fifo = os.open(PYTHON_FIFO_LOCATION, os.O_WRONLY) 
-    atexit.register(cleanup)
 
 def check_for_messages(callback: Callable[[int, bytes], None]):
     """
