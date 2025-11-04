@@ -31,10 +31,10 @@ struct bufferStruct
 
 struct messageStruct
 {
-    int messageLen;
+    int messageLen; //Total eventual size of message in bytes
     char* message;
     int messageCap;
-    int messagePos;
+    int messagePos; //Current amount of bytes in the message
 };
 
 struct bufferStruct buffer;
@@ -42,7 +42,10 @@ struct messageStruct message;
 
 int cFIFO, pyFIFO;
 
-void closeFIFOs(void)
+/**
+ * Closes FIFOs and frees buffers
+ */
+void cleanup(void)
 {
     close(pyFIFO);
     close(cFIFO);
@@ -51,6 +54,9 @@ void closeFIFOs(void)
     free(message.message);
 }
 
+/**
+ * Sends message on the FIFO with payload size header
+ */
 int sendMessage(const unsigned char* msg, int len)
 {
     if(len > UINT16_MAX)
@@ -58,8 +64,10 @@ int sendMessage(const unsigned char* msg, int len)
         printf("Message length exceeds 65535 bytes");
         return 1;
     }
+    //Big endian order for payload size
     uint16_t numBytes = htons((uint16_t)len);
 
+    //Write header and data to fifo
     struct iovec iov[2];
     iov[0].iov_base = (void*)&numBytes; 
     iov[0].iov_len = 2;
@@ -75,10 +83,13 @@ int sendMessage(const unsigned char* msg, int len)
     return 0;
 }
 
-//TODO: Replace this with a callback in checkForMessages
-
+/**
+ * Creates FIFOs and resets buffers
+ * MUST be called once at the start of the program
+ */
 int setup(void)
 {
+    //Reset buffer andd message
     buffer.buffer = NULL;
     buffer.bufferCap = 0;
     buffer.bufferLen = 0;
@@ -87,6 +98,8 @@ int setup(void)
     message.messageCap = 0;
     message.messageLen = 0;
     message.messagePos = 0;
+
+    //Create fifos if they don't exist
     printf("CREATING FIFOs\n");
     if(mkfifo(PY_FIFO_LOCATION, 0777) == -1)
     {
@@ -105,6 +118,7 @@ int setup(void)
         }
     }
 
+    //Open in this order to prevent deadlock
     printf("OPENING PY FIFO\n");
     pyFIFO = open(PY_FIFO_LOCATION, O_RDONLY | O_NONBLOCK);
     if(pyFIFO == -1)
@@ -120,11 +134,16 @@ int setup(void)
         return 1;
     }
 
-    atexit(closeFIFOs);
+    atexit(cleanup);
     return 0;
 }
 
-//Protocol: [2-byte payload length][payload]
+/**
+ * Checks the FIFO for any new data, calls callback if a complete message is found
+ * Put this in a loop
+ * Protocol: [2-byte payload length][payload]
+ */
+
 int checkForMessages(void (*callback)(int, const char*))
 {
     fd_set readfds;
@@ -134,7 +153,7 @@ int checkForMessages(void (*callback)(int, const char*))
     tv.tv_sec = 0;
     tv.tv_usec = 0;
 
-    //Check for updates on the pipe
+    //Check for updates on the FIFO
     int result = select(pyFIFO + 1, &readfds, NULL, NULL, &tv);
     if(result > 0 && FD_ISSET(pyFIFO, &readfds))
     {
@@ -164,10 +183,12 @@ int checkForMessages(void (*callback)(int, const char*))
             memcpy(buffer.buffer + buffer.bufferLen, data, (size_t)bytesRead);
             buffer.bufferLen = newBufferLen;
 
+            //Process buffer while there is still stuff in it
             while(1)
             {
                 if(message.messageLen == 0)
                 {
+                    //Get new size from header if possible
                     if(buffer.bufferLen < 2) break;
 
                     uint16_t messageLen;
@@ -183,6 +204,7 @@ int checkForMessages(void (*callback)(int, const char*))
                 int bytesNeeded = message.messageLen - message.messagePos;
                 int bytesAvailable = buffer.bufferLen;
 
+                //Check if we have enough bytes to form the full message
                 if(bytesAvailable >= bytesNeeded)
                 {
                     if(message.messageCap < message.messageLen)
@@ -210,6 +232,7 @@ int checkForMessages(void (*callback)(int, const char*))
                 }
                 else
                 {
+                    //Accumulate the message if not enough bytes in buffer
                     if(message.messageCap < message.messageLen)
                     {
                         int newCap = message.messageLen;
@@ -230,6 +253,7 @@ int checkForMessages(void (*callback)(int, const char*))
                 }
             }
 
+            //Shrink buffeer if necessary
             if(buffer.bufferCap > MIN_BUFFER_SIZE && buffer.bufferLen < (buffer.bufferCap >> 2))
             {
                 size_t newCapacity = buffer.bufferCap / 2;
@@ -248,6 +272,7 @@ int checkForMessages(void (*callback)(int, const char*))
                 }
             }
 
+            //Shrink message if necessary
             if(message.messageCap > MIN_BUFFER_SIZE && message.messagePos < (message.messageCap >> 2))
             {
                 size_t newCapacity = message.messageCap / 2;
@@ -268,7 +293,8 @@ int checkForMessages(void (*callback)(int, const char*))
         }
         else if(bytesRead == 0)
         {
-            printf("Writer closed pipe\n");
+            //Reset state when other end of fifo is closed
+            printf("Writer closed pipe, reopening...\n");
             free(buffer.buffer);
             buffer.buffer = NULL;
             buffer.bufferLen = 0;

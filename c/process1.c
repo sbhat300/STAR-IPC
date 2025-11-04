@@ -8,8 +8,8 @@
 void doSomething(int len, const char* msg)
 {
     printf("RECEIVED MESSAGE WITH LENGTH %d:\n", len);
-    for(int i = 0; i < len; i++) printf("%02hhx", *(msg + i));
-    //for(int i = 0; i < len; i++) printf("%c", *(msg + i));
+    //for(int i = 0; i < len; i++) printf("%02hhx", *(msg + i));
+    for(int i = 0; i < len; i++) printf("%c", *(msg + i));
     printf("\n");
 }
 
