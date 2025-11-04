@@ -3,6 +3,8 @@
 #include <stdio.h>
 #include <string.h>
 #include <errno.h>
+#include <limits.h>
+#include <stdint.h>
 
 #include <sys/stat.h>
 #include <sys/types.h>
@@ -10,6 +12,7 @@
 #include <sys/time.h>
 #include <sys/uio.h>
 #include <fcntl.h>
+#include <arpa/inet.h> 
 
 #include "IPCHelper.h"
 
@@ -50,34 +53,29 @@ void closeFIFOs(void)
 
 int sendMessage(const unsigned char* msg, int len)
 {
-    if(len > 255)
+    if(len > UINT16_MAX)
     {
-        printf("Message length exceeds 255 bytes");
+        printf("Message length exceeds 65535 bytes");
         return 1;
     }
-    unsigned char numBytes = (unsigned char)len;
+    uint16_t numBytes = htons((uint16_t)len);
 
     struct iovec iov[2];
     iov[0].iov_base = (void*)&numBytes; 
-    iov[0].iov_len = 1;
+    iov[0].iov_len = 2;
     iov[1].iov_base = (void*)msg;
-    iov[1].iov_len = numBytes;
+    iov[1].iov_len = len;
     ssize_t bytesWritten = writev(cFIFO, iov, 2);
     if(bytesWritten == -1)
     {
         printf("Could not write to FIFO file\n");
         return 1;
     }
-    printf("%zd bytes sent out of %d (+1)\n", bytesWritten, len + 1);
+    printf("%zd bytes sent out of %d (+2)\n", bytesWritten, len + 2);
     return 0;
 }
 
-void doSomething(int len, const char* msg)
-{
-    printf("RECEIVED MESSAGE WITH LENGTH %d:\n", len);
-    for(int i = 0; i < len; i++) printf("%02hhx", *(msg + i));
-    printf("\n");
-}
+//TODO: Replace this with a callback in checkForMessages
 
 int setup(void)
 {
@@ -126,7 +124,8 @@ int setup(void)
     return 0;
 }
 
-int checkForMessages(void)
+//Protocol: [2-byte payload length][payload]
+int checkForMessages(void (*callback)(int, const char*))
 {
     fd_set readfds;
     FD_ZERO(&readfds);
@@ -169,13 +168,16 @@ int checkForMessages(void)
             {
                 if(message.messageLen == 0)
                 {
-                    if(buffer.bufferLen < 1) break;
+                    if(buffer.bufferLen < 2) break;
 
-                    message.messageLen = (unsigned char)buffer.buffer[0];
+                    uint16_t messageLen;
+                    memcpy(&messageLen, buffer.buffer, 2);
+
+                    message.messageLen = (int)ntohs(messageLen);
                     message.messagePos = 0;
                     
-                    buffer.bufferLen--;
-                    memmove(buffer.buffer, buffer.buffer + 1, buffer.bufferLen);
+                    buffer.bufferLen -= 2;
+                    memmove(buffer.buffer, buffer.buffer + 2, buffer.bufferLen);
                 }
 
                 int bytesNeeded = message.messageLen - message.messagePos;
@@ -198,7 +200,7 @@ int checkForMessages(void)
 
                     memcpy(message.message + message.messagePos, buffer.buffer, bytesNeeded);
                     message.messagePos += bytesNeeded;
-                    doSomething(message.messageLen, message.message);
+                    callback(message.messageLen, message.message);
                     message.messageLen = 0;
                     message.messagePos = 0;
 

@@ -1,6 +1,9 @@
 
 import os
 import select
+import atexit
+import struct
+from typing import Callable
 
 C_FIFO_LOCATION = '/tmp/cfifo'
 PYTHON_FIFO_LOCATION = '/tmp/pyfifo'
@@ -11,17 +14,13 @@ buffer = b''
 message_len = 0 
 message = b'' 
 
-
-def do_something(length: int, msg: bytes):
-    print(f'RECEIVED MESSAGE WITH LENGTH {length}:\n{msg}')
-    
 def send_message(msg: bytes):
-    if(len(msg) > 255):
-        print("Message length is greater than 255")
+    if(len(msg) > 65535):
+        print("Message length is greater than 65535)")
         return
-    message_len = bytes([len(msg)])
+    message_len = struct.pack('!H', len(msg)) 
     written = os.write(py_fifo, message_len + msg)
-    print(f'{written} bytes sent out of {len(msg) + 1} (+1)')
+    print(f'{written} bytes sent out of {len(msg) + 2} (+2)')
 
 def setup():
     global C_FIFO_LOCATION, PYTHON_FIFO_LOCATION, c_fifo, py_fifo
@@ -35,10 +34,11 @@ def setup():
     c_fifo = os.open(C_FIFO_LOCATION, os.O_RDONLY | os.O_NONBLOCK)
     print('OPENING PY FIFO')
     py_fifo = os.open(PYTHON_FIFO_LOCATION, os.O_WRONLY) 
+    atexit.register(cleanup)
 
-def check_for_messages():
+def check_for_messages(callback: Callable[[int, bytes], None]):
     """
-    Protocol: [1-byte payload length][payload]
+    Protocol: [2-byte payload length][payload]
     """
     global buffer, c_fifo, message_len, message
     
@@ -67,11 +67,11 @@ def check_for_messages():
 
     while True:
         if message_len == 0:
-            if len(buffer) < 1:
+            if len(buffer) < 2:
                 break 
             
-            message_len = int(buffer[0])
-            buffer = buffer[1:] 
+            message_len = struct.unpack('!H', buffer[:2])[0] 
+            buffer = buffer[2:] 
             message = b''     
             
         bytes_needed = message_len - len(message)
@@ -79,7 +79,7 @@ def check_for_messages():
         
         if bytes_available >= bytes_needed:
             message += buffer[:bytes_needed]
-            do_something(len(message), message)
+            callback(len(message), message)
             buffer = buffer[bytes_needed:]
             message_len = 0
             message = b''
